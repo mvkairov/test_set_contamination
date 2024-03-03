@@ -1,18 +1,13 @@
 import os
+import json
 import math
 import random
 import numpy as np
+from tqdm.auto import tqdm
 from scipy.stats import t as tdist
 
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
-
-from tqdm.auto import tqdm
-
-import json
-import fire
-
-os.environ['TOKENIZERS_PARALLELISM'] = "True"
 
 flatten = lambda l : [x for s in l for x in s]
 shuffle = lambda l : random.sample(l, k=len(l))
