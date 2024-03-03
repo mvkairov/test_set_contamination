@@ -11,6 +11,19 @@ def make_seq_mask(x, pad_idx):
     return mask, padding_mask
 
 
+@torch.no_grad()
+def make_seq(model, tokenizer, pad_idx, batch_size=1, prefix=None, max_len=384):
+    model.eval()
+    if prefix is None:
+        prefix = torch.full((batch_size, 1), fill_value=tokenizer.bos_id()).to(next(model.parameters()).device)
+    for _ in range(max_len):
+        prefix = prefix.clone().detach()
+        mask, pad_mask = make_seq_mask(prefix, pad_idx)
+        output_logits = torch.nn.functional.softmax(model.forward(prefix, mask, pad_mask)[:, -1, :], dim=-1)
+        prefix = torch.cat((prefix, torch.multinomial(output_logits, 1)), dim=-1)
+    return prefix
+
+
 class DecoderLayer(nn.Module):
     def __init__(self, d_model, nhead, ff_dim, dropout, batch_first=True, *args, **kwargs):
         super().__init__(*args, **kwargs)
