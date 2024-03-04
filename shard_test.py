@@ -35,14 +35,10 @@ def compute_logprob_of_token_sequence(tokens, model, context_len=2048, stride=10
     logp = torch.zeros((1, 1), dtype=torch.float32).to(device)
 
     # compute the smallest multiple k of s so that t <= ks + c.
-    t = len(inputs)
-    c = context_len
-    s = stride
-    k = math.ceil(max(0, t - c) / s)
-    for j in range(k + 1):
-        start = s * j
-        end = min(s * j + c, t)
-        rel_offs = max(0, c - s) if j > 0 else 0
+    for j in range(math.ceil(max(0, len(inputs) - context_len) / stride)):
+        start = stride * j
+        end = min(stride * j + context_len, len(inputs))
+        rel_offs = max(0, context_len - stride) if j > 0 else 0
 
         w_inp = inputs[start:end]
         w_inp = torch.tensor(w_inp).to(device)
@@ -61,6 +57,13 @@ def compute_logprob_of_token_sequence(tokens, model, context_len=2048, stride=10
         torch.cuda.empty_cache()
 
     return logp.item()
+
+
+def t_test(canon, shuffled):
+    diffs = canon - shuffled.mean(axis=1)
+    z = np.mean(diffs) / np.std(diffs) * np.sqrt(len(diffs))
+    pval = 1 - tdist.cdf(z, df=len(diffs)-1)
+    return pval
 
 
 def main(model_name_or_path, dataset_path, context_len=2048, stride=1024, num_shards=50,
@@ -89,17 +92,11 @@ def main(model_name_or_path, dataset_path, context_len=2048, stride=1024, num_sh
     m = AutoModelForCausalLM.from_pretrained(model_name_or_path)
     m.to(device)
     
-    for start, end in tqdm(zip(shard_bounds, shard_bounds[1:])):
+    for start, end in tqdm(list(zip(shard_bounds, shard_bounds[1:]))):
         cur_tokens = flatten(tokenized_examples[start:end])
         canon.append(compute_logprob_of_token_sequence(cur_tokens, m, context_len, stride, device))
+        shuffled.append([])
         for _ in range(permutations_per_shard):
-            shuffled.append(compute_logprob_of_token_sequence(shuffle(cur_tokens), m, context_len, stride, device))
+            shuffled[-1].append(compute_logprob_of_token_sequence(shuffle(cur_tokens), m, context_len, stride, device))
     
     return canon, shuffled
-
-
-def t_test(canon, shuffled):
-    diffs = canon - shuffled.mean(axis=1)
-    z = np.mean(diffs) / np.std(diffs) * np.sqrt(len(diffs))
-    pval = 1 - tdist.cdf(z, df=len(diffs)-1)
-    return pval
