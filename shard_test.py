@@ -8,7 +8,7 @@ from scipy.stats import t as tdist
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-from bhwdl.LLAMA.train import make_seq_mask
+from bhwdl.LLAMA.model import make_seq_mask
 
 flatten = lambda l: [x for s in l for x in s]
 shuffle = lambda l: random.sample(l, k=len(l))
