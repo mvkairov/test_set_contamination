@@ -9,8 +9,8 @@ from scipy.stats import t as tdist
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-flatten = lambda l : [x for s in l for x in s]
-shuffle = lambda l : random.sample(l, k=len(l))
+flatten = lambda l: [x for s in l for x in s]
+shuffle = lambda l: random.sample(l, k=len(l))
 
 
 def load_dataset(dataset_path):
@@ -28,7 +28,7 @@ def load_dataset(dataset_path):
     return lines
 
 
-def compute_logprob_of_token_sequence(tokens, model, context_len=2048, stride=1024, device=0):
+def compute_logprob_of_token_sequence(tokens, model, context_len, stride, device):
     inputs = tokens[:-1]
     targets = tokens[1:]
 
@@ -66,8 +66,8 @@ def t_test(canon, shuffled):
     return pval
 
 
-def main(model_name_or_path, dataset_path, context_len=2048, stride=1024, num_shards=50,
-         permutations_per_shard=250, random_seed=0, max_examples=5000, device="cuda"):
+def shard_test(model_name_or_path, dataset_path, context_len=2048, stride=1024, num_shards=50,
+               permutations_per_shard=25, random_seed=0, max_examples=5000, device="cuda"):
     # Set random seed(s).
     random.seed(random_seed)
     np.random.seed(random_seed)
@@ -100,3 +100,19 @@ def main(model_name_or_path, dataset_path, context_len=2048, stride=1024, num_sh
             shuffled[-1].append(compute_logprob_of_token_sequence(shuffle(cur_tokens), m, context_len, stride, device))
     
     return canon, shuffled
+
+
+def shard_test_mod(model, ds, context_len, stride, num_shards, num_permutations, num_examples, device):
+    shard_idx = enumerate([num_examples // num_shards] * num_shards)
+    shard_counts = [(x + 1 if i < num_examples % num_shards else x) for i, x in shard_idx]
+    shard_bounds = [0] + np.cumsum(np.asarray(shard_counts)).tolist() 
+
+    canon, shuffled = [], [] 
+    for start, end in tqdm(list(zip(shard_bounds, shard_bounds[1:]))):
+        cur_tokens = flatten(ds[start:end])
+        canon.append(compute_logprob_of_token_sequence(cur_tokens, model, context_len, stride, device))
+        shuffled.append([])
+        for _ in range(num_permutations):
+            shuffled[-1].append(compute_logprob_of_token_sequence(shuffle(cur_tokens), model, context_len, stride, device))
+            
+    return canon, shuffled 
