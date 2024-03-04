@@ -1,4 +1,3 @@
-import os
 import json
 import math
 import random
@@ -8,6 +7,8 @@ from scipy.stats import t as tdist
 
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
+
+from bhwdl.LLAMA.train import make_seq_mask
 
 flatten = lambda l: [x for s in l for x in s]
 shuffle = lambda l: random.sample(l, k=len(l))
@@ -102,7 +103,39 @@ def shard_test(model_name_or_path, dataset_path, context_len=2048, stride=1024, 
     return canon, shuffled
 
 
-def shard_test_mod(model, ds, context_len, stride, num_shards, num_permutations, num_examples, device):
+def logprob_mod(tokens, model, pad_idx, context_len, stride, device):
+    inputs = tokens[:-1]
+    targets = tokens[1:]
+
+    logp = torch.zeros((1, 1), dtype=torch.float32).to(device)
+
+    # compute the smallest multiple k of s so that t <= ks + c.
+    for j in range(math.ceil(max(0, len(inputs) - context_len) / stride)):
+        start = stride * j
+        end = min(stride * j + context_len, len(inputs))
+        rel_offs = max(0, context_len - stride) if j > 0 else 0
+
+        w_inp = inputs[start:end]
+        w_inp = torch.tensor(w_inp).to(device)
+        w_trg = targets[start:end]
+        w_trg = torch.tensor(w_trg).to(device)
+
+        model.eval()
+        with torch.no_grad():
+            mask, pad_mask = make_seq_mask(w_inp, pad_idx)
+            out = model(torch.unsqueeze(w_inp, 0), mask, pad_mask)
+            logps = torch.nn.functional.log_softmax(out.logits[0], dim=-1)
+            logps = logps.gather(-1, w_trg.unsqueeze(-1)).squeeze(-1)
+            logp += logps[rel_offs:].sum()
+
+        del w_inp
+        del w_trg
+        torch.cuda.empty_cache()
+
+    return logp.item()
+
+
+def shard_test_mod(model, ds, pad_idx, context_len, stride, num_shards, num_permutations, num_examples, device):
     shard_idx = enumerate([num_examples // num_shards] * num_shards)
     shard_counts = [(x + 1 if i < num_examples % num_shards else x) for i, x in shard_idx]
     shard_bounds = [0] + np.cumsum(np.asarray(shard_counts)).tolist() 
@@ -110,9 +143,9 @@ def shard_test_mod(model, ds, context_len, stride, num_shards, num_permutations,
     canon, shuffled = [], [] 
     for start, end in tqdm(list(zip(shard_bounds, shard_bounds[1:]))):
         cur_tokens = flatten(ds[start:end])
-        canon.append(compute_logprob_of_token_sequence(cur_tokens, model, context_len, stride, device))
+        canon.append(logprob_mod(cur_tokens, model, pad_idx, context_len, stride, device))
         shuffled.append([])
         for _ in range(num_permutations):
-            shuffled[-1].append(compute_logprob_of_token_sequence(shuffle(cur_tokens), model, context_len, stride, device))
-            
+            shuffled[-1].append(logprob_mod(shuffle(cur_tokens), model, pad_idx context_len, stride, device))
+
     return canon, shuffled 
