@@ -146,6 +146,6 @@ def shard_test_mod(model, ds, pad_idx, context_len, stride, num_shards, num_perm
         canon.append(logprob_mod(cur_tokens, model, pad_idx, context_len, stride, device))
         shuffled.append([])
         for _ in range(num_permutations):
-            shuffled[-1].append(logprob_mod(shuffle(cur_tokens), model, pad_idx context_len, stride, device))
+            shuffled[-1].append(logprob_mod(shuffle(cur_tokens), model, pad_idx, context_len, stride, device))
 
     return canon, shuffled 
